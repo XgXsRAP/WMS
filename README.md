@@ -1,10 +1,11 @@
-# WMS
 We're building a SaaS AI-powered Inventory management system for web browser cloud based. This Inventory system will manage between 500-4000 SKUS and will be used by small-medium businesses.
  The system will be built using a modern web stack and will leverage AI to provide insights and recommendations for inventory management and most important, be user friendly and intiutive.
  AI will be used to provide insights such as reorder suggestions, low stock alerts, and predictive analytics for inventory needs based on historical data and trends. But also develop this system
     with a strong focus on user experience, ensuring that the interface is intuitive and easy to navigate for users of all technical levels and not let the AI take over the user experience.
 As we're working for small-medium businesses, this does not require any Outbound logistics (shipping, routes, customer fulfillment ETA's, etc), this small-medium businesses don't operate with no locations
 as bins, reserves or multi-bin tracking BUT can be added in future versions if the business grows and requires it.
+
+This SaaS product will be built to perfom for a minimun of 10 tenants.Shared database, shared schema, tenant_id on every table + Postgres Row-Level Security (RLS).
 
     Besides just been an Inventory management system, this SaaS platform will perform as well the Point of Sale features, allowing to process sales transactions, manage customer data, generate recipts,
     and have a clear and simple interface for sales staff to use. The POS system will integrate seamlessly with the inventory management system, ensuring that stock levels are updated in real-time as sales are made.
@@ -62,6 +63,18 @@ V1 architecture should look like this:
                          └─────────────┘
 
 
+Frontend:	React + TypeScript + Tailwind	Type safety matters more once you have multiple tenants/roles; Tailwind keeps UI consistent without heavy CSS work
+Backend	FastAPI (Python)	Async-native (good for API + AI calls), typed with Pydantic (great for enforcing tenant-scoped schemas), strong AI/data ecosystem
+Database:	PostgreSQL	RLS support is the deciding factor for multi-tenant isolation; rock-solid for transactional stock data
+Cache/Queue:	Redis	Session cache + backing for Celery
+Background jobs:	Celery (or lighter: FastAPI's own background tasks + a cron for v1)	Reorder suggestion calcs, tracking polling, and AI calls shouldn't block the request cycle
+Auth:	JWT with tenant claim embedded	Every token carries tenant_id + role; middleware sets the Postgres session variable RLS checks against
+Object storage:	S3-compatible (Cloudflare R2 or DigitalOcean Spaces)	Cheaper than raw AWS S3 at this scale, same API
+Reverse proxy/SSL:	Caddy	Auto-provisions Let's Encrypt certs, dead simple config
+Containerization	Docker + docker-compose	Portable, reproducible, easy to move between VPS providers later
+
+
+
 Core philosophy:
 Auth & Users — login, roles (admin, staff, viewer), password reset
 Products/SKUs — name, SKU code, category, unit, cost/price, barcode (optional)
@@ -72,6 +85,13 @@ Orders — purchase orders (stock in) and sales/dispatch orders (stock out)
 Reporting — low-stock alerts, stock value, movement history
 Audit log — who changed what stock, when (critical for inventory trust)
 
+Tenant model — how businesses actually get separated;
+
+Tenants table — id, business name, plan tier, created_at, status (active/suspended)
+Users table — tenant_id (FK), email, role (owner/staff), hashed password
+Every other table (SKUs, Vendors, POs, Returns, StockMovements) gets tenant_id NOT NULL
+Login flow: user authenticates → JWT issued with tenant_id embedded → every API request sets that as the active tenant context → Postgres RLS policy USING (tenant_id = current_setting('app.tenant_id')::uuid) enforces it at the DB level.
+Routing: simplest for v1 is one domain with tenant resolved from the logged-in user (not subdomains) — subdomain-per-tenant (acme.yourapp.com)
 
 Core modules for this V1 version:
 
@@ -157,7 +177,28 @@ StockMovements (audit trail)
 
 
  CLOUD ARCHIRECTURE BROWSER-BASED
- 
+                     [Browser - any tenant's staff/owner]
+                                  |
+                          HTTPS (per-tenant login)
+                                  |
+                    [Reverse proxy - Caddy/Nginx + SSL]
+                                  |
+                    [Frontend - React + TS + Tailwind SPA/PWA]
+                                  |
+                          REST API (JWT auth)
+                                  |
+                    [Backend - FastAPI, tenant-aware middleware]
+                        |                    |
+                [PostgreSQL]          [Redis - cache/queue]
+                (RLS by tenant_id)           |
+                        |            [Celery workers - async]
+                [Object storage]      - AI reorder calcs
+                (S3/R2 - images,       - tracking/ETA polling
+                 per-tenant prefix)    - notifications
+                        |
+              [AI layer - LLM API calls]
+              (Anthropic/OpenAI, tenant-scoped
+               prompts, no cross-tenant context)
 
 
 
