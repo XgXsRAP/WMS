@@ -11,21 +11,42 @@ This SaaS product will be built to perfom for a minimun of 10 tenants.Shared dat
     and have a clear and simple interface for sales staff to use. The POS system will integrate seamlessly with the inventory management system, ensuring that stock levels are updated in real-time as sales are made.
 
 V1 architecture should look like this:
-[Browser / Edge / any browser]  [Optional native/desktop app]
-              |                              |
-              +---------------+--------------+
-                              |
-                     [Frontend - SPA]
-                              |
-                        HTTPS / REST or GraphQL API
-                              |
-                     [Backend API server]                                           
-                              |
-                +-------------+--------------+
-                |                            |
-          [Database]                  [Auth service]
-                |
-        [Object storage - optional, for images/docs]
+```text
+                   ┌──────────────────────────────────┐
+                   │  BROWSER / EDGE / ANY BROWSER    │
+                   └────────────────┬─────────────────┘
+                                    │
+                   ┌────────────────┴─────────────────┐
+                   │    OPTIONAL NATIVE / DESKTOP    │
+                   │              APP                │
+                   └────────────────┬─────────────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │   FRONTEND - SPA    │
+                         └──────────┬──────────┘
+                                    │
+                          HTTPS / REST / GraphQL
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │  BACKEND API SERVER │
+                         └──────────┬──────────┘
+                                    │
+                     ┌──────────────┴──────────────┐
+                     │                             │
+                     ▼                             ▼
+              ┌─────────────┐               ┌─────────────┐
+              │  DATABASE   │               │ AUTH SERVICE│
+              └──────┬──────┘               └─────────────┘
+                     │
+                     ▼
+          ┌────────────────────────┐
+          │    OBJECT STORAGE      │
+          │       OPTIONAL         │
+          │    Images / Documents  │
+          └────────────────────────┘
+
 
         
 
@@ -177,28 +198,42 @@ StockMovements (audit trail)
 
 
  CLOUD ARCHIRECTURE BROWSER-BASED
-                     [Browser - any tenant's staff/owner]
-                                  |
-                          HTTPS (per-tenant login)
-                                  |
-                    [Reverse proxy - Caddy/Nginx + SSL]
-                                  |
-                    [Frontend - React + TS + Tailwind SPA/PWA]
-                                  |
-                          REST API (JWT auth)
-                                  |
-                    [Backend - FastAPI, tenant-aware middleware]
-                        |                    |
-                [PostgreSQL]          [Redis - cache/queue]
-                (RLS by tenant_id)           |
-                        |            [Celery workers - async]
-                [Object storage]      - AI reorder calcs
-                (S3/R2 - images,       - tracking/ETA polling
-                 per-tenant prefix)    - notifications
-                        |
-              [AI layer - LLM API calls]
-              (Anthropic/OpenAI, tenant-scoped
-               prompts, no cross-tenant context)
+  ┌───────────────────────┬──────────────────────────┬──────────────────────────────────────────────┐
+│        LAYER          │          CHOICE          │                     WHY                      │
+├───────────────────────┼──────────────────────────┼──────────────────────────────────────────────┤
+│ Frontend              │ React + TypeScript +     │ Type safety matters more once you have      │
+│                       │ Tailwind                 │ multiple tenants/roles; Tailwind keeps UI   │
+│                       │                          │ consistent without heavy CSS work           │
+├───────────────────────┼──────────────────────────┼──────────────────────────────────────────────┤
+│ Backend               │ FastAPI (Python)        │ Async-native (good for API + AI calls),     │
+│                       │                          │ typed with Pydantic (great for enforcing    │
+│                       │                          │ tenant-scoped schemas), strong AI/data      │
+│                       │                          │ ecosystem                                    │
+├───────────────────────┼──────────────────────────┼──────────────────────────────────────────────┤
+│ Database              │ PostgreSQL              │ RLS support is the deciding factor for      │
+│                       │                          │ multi-tenant isolation; rock-solid for      │
+│                       │                          │ transactional stock data                     │
+├───────────────────────┼──────────────────────────┼──────────────────────────────────────────────┤
+│ Cache/Queue            │ Redis                    │ Session cache + backing for Celery          │
+├───────────────────────┼──────────────────────────┼──────────────────────────────────────────────┤
+│ Background jobs       │ Celery (or lighter:     │ Reorder suggestion calcs, tracking polling, │
+│                       │ FastAPI's own background │ and AI calls shouldn't block the request     │
+│                       │ tasks + a cron for v1)  │ cycle                                        │
+├───────────────────────┼──────────────────────────┼──────────────────────────────────────────────┤
+│ Auth                  │ JWT with tenant claim    │ Every token carries tenant_id + role;       │
+│                       │ embedded                 │ middleware sets the Postgres session        │
+│                       │                          │ variable RLS checks against                  │
+├───────────────────────┼──────────────────────────┼──────────────────────────────────────────────┤
+│ Object storage        │ S3-compatible            │ Cheaper than raw AWS S3 at this scale,      │
+│                       │ (Cloudflare R2 or        │ same API                                     │
+│                       │ DigitalOcean Spaces)     │                                              │
+├───────────────────────┼──────────────────────────┼──────────────────────────────────────────────┤
+│ Reverse proxy / SSL   │ Caddy                    │ Auto-provisions Let's Encrypt certs,       │
+│                       │                          │ dead simple config                           │
+├───────────────────────┼──────────────────────────┼──────────────────────────────────────────────┤
+│ Containerization      │ Docker + docker-compose  │ Portable, reproducible, easy to move        │
+│                       │                          │ between VPS providers later                 │
+└───────────────────────┴──────────────────────────┴──────────────────────────────────────────────┘
 
 
 
